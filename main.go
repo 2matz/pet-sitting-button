@@ -2,38 +2,66 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/url"
+	"os"
 
 	"github.com/2matz/soracom-ltem-button-go-handler/oneclick"
 	"github.com/2matz/soracom-ltem-button-go-handler/slack"
 	"github.com/aws/aws-lambda-go/lambda"
 )
 
-var logger log.Logger
+var (
+	singleClickMessage string
+	doubleClickMessage string
+	longClickMessage   string
+)
+
+const (
+	defaultSingleClickMessage   = "single clicked!"
+	defaultDoubleClickMessage   = "double clicked!"
+	defaultLongClickMessage     = "long clicked!"
+	unsupportedClickTypeMessage = "unsupported click type"
+)
 
 // HandleRequest ...
-func HandleRequest(ctx context.Context, event oneclick.Event) (result string, err error) {
+func HandleRequest(ctx context.Context, event oneclick.Event) {
 	var slackWebhookURL *url.URL
-	attributes := event.GetPlacementAttributes()
-	u := attributes.(map[string]interface{})["slack_webhook_url"].(string)
+	var err error
+	attributes := event.GetPlacementAttributes().(map[string]interface{})
+
+	u := attributes["slack_webhook_url"].(string)
 	if u == "" {
-		result = ""
-		err = fmt.Errorf("%s", "Slack Webhook URL is not defined.")
+		log.Println("Slack Webhook URL is not defined.")
 		return
 	}
 	slackWebhookURL, err = url.ParseRequestURI(u)
 	if err != nil {
-		result = ""
-		err = fmt.Errorf("%s", "Slack Webhook URL is incorrect format.")
+		log.Printf("Slack Webhook URL is incorrect format. %v", err)
 		return
 	}
 
+	if singleClickMessage == "" {
+		singleClickMessage = attributes["single_click_message"].(string)
+		if singleClickMessage == "" {
+			singleClickMessage = defaultSingleClickMessage
+		}
+	}
+	if doubleClickMessage == "" {
+		doubleClickMessage = attributes["double_click_message"].(string)
+		if doubleClickMessage == "" {
+			doubleClickMessage = defaultDoubleClickMessage
+		}
+	}
+	if longClickMessage == "" {
+		longClickMessage = attributes["long_click_message"].(string)
+		if longClickMessage == "" {
+			longClickMessage = defaultLongClickMessage
+		}
+	}
 	clickType, err := event.GetClickType()
 	if err != nil {
-		result = ""
-		err = fmt.Errorf("%s", "Click type is not defined.")
+		log.Printf("Click type is not defined. %v", err)
 		return
 	}
 
@@ -46,11 +74,13 @@ func HandleRequest(ctx context.Context, event oneclick.Event) (result string, er
 
 	switch clickType {
 	case oneclick.SingleClick:
-		message = "ご飯の用意ができましたよ〜:rice::heart_eyes_cat:"
+		message = singleClickMessage
 	case oneclick.DoubleClick:
-		message = "トイレが綺麗になりました:smile_cat:"
+		message = doubleClickMessage
 	case oneclick.LongClick:
-		message = "緊急事態です!:scream_cat::rotating_light:"
+		message = longClickMessage
+	default:
+		message = unsupportedClickTypeMessage
 	}
 
 	slackWebHookClient := slack.NewSlackWebhookClient(
@@ -62,11 +92,17 @@ func HandleRequest(ctx context.Context, event oneclick.Event) (result string, er
 		"",
 		"",
 	)
-	result, err = slackWebHookClient.Post()
-
-	log.Printf("result: %v, error: %v", result, err)
-
+	_, err = slackWebHookClient.Post()
+	if err != nil {
+		log.Println(err)
+	}
 	return
+}
+
+func init() {
+	singleClickMessage = os.Getenv("single_click_message")
+	doubleClickMessage = os.Getenv("double_click_message")
+	longClickMessage = os.Getenv("long_click_message")
 }
 
 func main() {
